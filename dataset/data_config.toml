@@ -1,0 +1,16 @@
+[general]
+flip_aug = false
+color_aug = false
+keep_tokens_separator = "|||"
+shuffle_caption = false
+caption_tag_dropout_rate = 0
+caption_extension = ".caption"
+
+[[datasets]]
+batch_size = 1
+enable_bucket = true
+resolution = [1024, 1024]
+
+[[datasets.subsets]]
+image_dir = "/data/16T_1/xuml/codes/DynamicMakeAnything/datasets/frame9"
+num_repeats = 1
