@@ -17,7 +17,7 @@
 </div>
 
 <p align="center">
-    <img src="images/example.pdf"/>
+    <img src="images/example.png"/>
 </p
 
 ## ⚙️ Setup
