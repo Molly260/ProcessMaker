@@ -1,8 +1,8 @@
 #!/bin/bash
 
 CKPT_PATH="./ckpt/unet/flux1-dev-fp8-e4m3fn.safetensors"
-CLIP_L_PATH="./ckpt/clip/clip_l.safetensors"
-T5XXL_PATH="./ckpt/clip/t5xxl_fp8_e4m3fn.safetensors"
+CLIP_L_PATH="./ckpt/encoder/clip_l.safetensors"
+T5XXL_PATH="./ckpt/encoder/t5xxl_fp8_e4m3fn.safetensors"
 AE_PATH="./ckpt/vae/ae.safetensors"
 
 dataset_config="./dataset/config_4.toml" 
