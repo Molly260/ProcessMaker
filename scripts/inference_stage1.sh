@@ -12,7 +12,7 @@ PROMPT=""
 CLASS_ID=18
 
 
-python flux_minimal_inference_asylora.py --ckpt_path $CKPT_PATH \
+python inference_stage1.py --ckpt_path $CKPT_PATH \
   --clip_l $CLIP_L_PATH \
   --t5xxl $T5XXL_PATH \
   --ae $AE_PATH \
