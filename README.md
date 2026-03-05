@@ -59,22 +59,22 @@ dataset/
 #### Step 4: Train
 **Train Stage 1**
 ```bash
-bash train_stage1.sh
+bash scripts/train_stage1.sh
 ```
 **Train Stage 2**
 ```bash
-bash train_stage2.sh
+bash scripts/train_stage2.sh
 ```
 
 #### Step 5: Inference
 **Inference Stage 1**
 ```bash
-bash sample_stage1.sh
+bash scripts/sample_stage1.sh
 ```
 **Inference Stage 2**
 
 ```bash
-bash sample_stage2.sh
+bash scripts/sample_stage2.sh
 ```
 
 ## Acknowledgement
