@@ -24,7 +24,6 @@ from library.utils import setup_logging
 from diffusers.utils import load_image
 import numpy as np
 
-# 导入滑动窗口相关功能
 import sys
 try:
     from sliding_window_utils import sliding_window_detection, compute_window_difference
@@ -40,8 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_text_encoder_fp8(index, text_encoder, te_weight_dtype, weight_dtype):
-    """处理T5XXL fp8兼容性问题"""
-    if index == 0:  # CLIP-L
+        if index == 0:  # CLIP-L
         logger.info(f"prepare CLIP-L for fp8: set to {te_weight_dtype}, set embeddings to {weight_dtype}")
         text_encoder.to(te_weight_dtype)  # fp8
         text_encoder.text_model.embeddings.to(dtype=weight_dtype)
@@ -189,12 +187,12 @@ def parse_grid_image(image_path, dataset_frame_num):
     width, height = image.size
     
     if dataset_frame_num == 4:
-        # 2x2 网格
+        # 2x2 
         rows, cols = 2, 2
         cell_width = width // 2
         cell_height = height // 2
     elif dataset_frame_num == 9:
-        # 3x3 网格
+        # 3x3 
         rows, cols = 3, 3
         cell_width = width // 3
         cell_height = height // 3
@@ -202,13 +200,10 @@ def parse_grid_image(image_path, dataset_frame_num):
         raise ValueError(f"Unsupported dataset_frame_num: {dataset_frame_num}")
     
     frames = []
-    # S型遍历：奇数行从左到右，偶数行从右到左
     for row in range(rows):
         if row % 2 == 0:
-            # 偶数行（0,2,4...）：从左到右
             col_range = range(cols)
         else:
-            # 奇数行（1,3,5...）：从右到左
             col_range = range(cols - 1, -1, -1)
         
         for col in col_range:
