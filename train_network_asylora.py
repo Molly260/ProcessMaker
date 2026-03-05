@@ -310,46 +310,13 @@ class NetworkTrainer:
         latents_caching_strategy = self.get_latents_caching_strategy(args)
         strategy_base.LatentsCachingStrategy.set_strategy(latents_caching_strategy)
 
-        # 准备数据集
         if args.dataset_class is None:
             blueprint_generator = BlueprintGenerator(ConfigSanitizer(True, True, args.masked_loss, True))
             if use_user_config:
                 logger.info(f"Loading dataset config from {args.dataset_config}")
                 user_config = config_util.load_user_config(args.dataset_config)
                 ignored = ["train_data_dir", "reg_data_dir", "in_json"]
-                # if any(getattr(args, attr) is not None for attr in ignored):
-                #     logger.warning(
-                #         "ignoring the following options because config file is found: {0} / 設定ファイルが利用されるため以下のオプションは無視されます: {0}".format(
-                #             ", ".join(ignored)
-                #         )
-                #     )
-            # else:
-            #     if use_dreambooth_method:
-            #         logger.info("Using DreamBooth method.")
-            #         user_config = {
-            #             "datasets": [
-            #                 {
-            #                     "subsets": config_util.generate_dreambooth_subsets_config_by_subdirs(
-            #                         args.train_data_dir, args.reg_data_dir
-            #                     )
-            #                 }
-            #             ]
-            #         }
-            #     else:
-            #         logger.info("Training with captions.")
-            #         user_config = {
-            #             "datasets": [
-            #                 {
-            #                     "subsets": [
-            #                         {
-            #                             "image_dir": args.train_data_dir,
-            #                             "metadata_file": args.in_json,
-            #                         }
-            #                     ]
-            #                 }
-            #             ]
-            #         }
-
+                
             blueprint = blueprint_generator.generate(user_config, args)     # user_config: LoraConfig.toml
             train_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
         else:
@@ -387,13 +354,12 @@ class NetworkTrainer:
         weight_dtype, save_dtype = train_util.prepare_dtype(args)
         vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
 
-        # 加载模型  model_version: flux text_encoder: t5, clip
         model_version, text_encoder, vae, unet = self.load_target_model(args, weight_dtype, accelerator)
 
         # text_encoder is List[CLIPTextModel] or CLIPTextModel
         text_encoders = text_encoder if isinstance(text_encoder, list) else [text_encoder]
 
-        # 加载模型以进行额外的差异学习        network_module: networks.asylora_flux
+
         sys.path.append(os.path.dirname(__file__))
         accelerator.print("import network module:", args.network_module)
         network_module = importlib.import_module(args.network_module)
@@ -415,7 +381,7 @@ class NetworkTrainer:
         #
         #     accelerator.print(f"all weights merged: {', '.join(args.base_weights)}")
 
-        # 准备学习
+
         if cache_latents:
             vae.to(accelerator.device, dtype=vae_dtype)
             vae.requires_grad_(False)
@@ -428,7 +394,6 @@ class NetworkTrainer:
 
             accelerator.wait_for_everyone()
 
-        # 如有必要，缓存文本编码器输出：将Text Encoder移至cpu或gpu
         # cache text encoder outputs if needed: Text Encoder is moved to cpu or gpu
         text_encoding_strategy = self.get_text_encoding_strategy(args)
         strategy_base.TextEncodingStrategy.set_strategy(text_encoding_strategy)
@@ -501,7 +466,6 @@ class NetworkTrainer:
             del t_enc
             network.enable_gradient_checkpointing()  # may have no effect
 
-        # 准备优化器等超参数
         accelerator.print("prepare optimizer, data loader etc.")
 
         # make backward compatibility for text_encoder_lr
@@ -530,7 +494,7 @@ class NetworkTrainer:
             lr_descriptions = None
 
         # if len(trainable_params) == 0:
-        #     accelerator.print("no trainable parameters found / 学習可能なパラメータが見つかりませんでした")
+        #     accelerator.print("no trainable parameters found")
         # for params in trainable_params:
         #     for k, v in params.items():
         #         if type(v) == float:
@@ -558,7 +522,6 @@ class NetworkTrainer:
             persistent_workers=args.persistent_data_loader_workers,
         )
 
-        # 计算学习步数
         if args.max_train_epochs is not None:
             args.max_train_steps = args.max_train_epochs * math.ceil(
                 len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps
@@ -567,20 +530,17 @@ class NetworkTrainer:
                 f"override steps. steps for {args.max_train_epochs} epochs is: {args.max_train_steps}"
             )
 
-        # 设置最大训练步数
         train_dataset_group.set_max_train_steps(args.max_train_steps)
 
-        # 设置调度器
         lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
 
-        # 实验功能：进行fp16/bf16学习包括梯度，将整个模型设置为fp16/bf16
-        if args.full_fp16:  # 不走
+        if args.full_fp16: 
             assert (
                 args.mixed_precision == "fp16"
             ), "full_fp16 requires mixed precision='fp16'。"
             accelerator.print("enable full fp16 training.")
             network.to(weight_dtype)
-        elif args.full_bf16:    # 不走
+        elif args.full_bf16:  
             assert (
                 args.mixed_precision == "bf16"
             ), "full_bf16 requires mixed precision='bf16'。"
@@ -622,8 +582,8 @@ class NetworkTrainer:
                 if te_weight_dtype != weight_dtype:
                     self.prepare_text_encoder_fp8(i, t_enc, te_weight_dtype, weight_dtype)
 
-        # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
-        if args.deepspeed:  # 不走
+
+        if args.deepspeed: 
             flags = self.get_text_encoders_train_flags(args, text_encoders)
             ds_model = deepspeed_utils.prepare_deepspeed_model(
                 args,
@@ -678,12 +638,11 @@ class NetworkTrainer:
 
         accelerator.unwrap_model(network).prepare_grad_etc(text_encoder, unet)
 
-        if not cache_latents:  # キャッシュしない場合はVAEを使うのでVAEを準備する
+        if not cache_latents:  
             vae.requires_grad_(False)
             vae.eval()
             vae.to(accelerator.device, dtype=vae_dtype)
 
-        # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
         if args.full_fp16:
             train_util.patch_accelerator_for_fp16_training(accelerator)
 
@@ -735,28 +694,26 @@ class NetworkTrainer:
         # resumeする
         train_util.resume_from_local_or_hf_if_specified(accelerator, args)
 
-        # epoch数を計算する
+
         num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
         num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
         if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
             args.save_every_n_epochs = math.floor(num_train_epochs / args.save_n_epoch_ratio) or 1
 
-        # 学習する
-        # TODO: find a way to handle total batch size when there are multiple datasets
         total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
-        accelerator.print("开始训练 / Training started")
+        accelerator.print("Training started")
         accelerator.print(
-            f"  训练图片数 * 重复次数 / Number of training images * repeats: {train_dataset_group.num_train_images}")
-        accelerator.print(f"  正则化图片数 / Number of regularization images: {train_dataset_group.num_reg_images}")
-        accelerator.print(f"  每个 epoch 的批次数 / Number of batches per epoch: {len(train_dataloader)}")
-        accelerator.print(f"  训练的 epoch 数 / Number of epochs: {num_train_epochs}")
+            f"   Number of training images * repeats: {train_dataset_group.num_train_images}")
+        accelerator.print(f"  Number of regularization images: {train_dataset_group.num_reg_images}")
+        accelerator.print(f"  Number of batches per epoch: {len(train_dataloader)}")
+        accelerator.print(f"  Number of epochs: {num_train_epochs}")
         accelerator.print(
-            f"  每个设备的批次大小 / Batch size per device: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}"
+            f"  Batch size per device: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}"
         )
-        # accelerator.print(f"  总批次大小（包括并行和分布式训练及梯度累积）/ Total batch size (with parallel & distributed & accumulation): {total_batch_size}")
-        accelerator.print(f"  梯度累积步数 / Gradient accumulation steps: {args.gradient_accumulation_steps}")
-        accelerator.print(f"  总优化步骤数 / Total optimization steps: {args.max_train_steps}")
+        # accelerator.print(f" Total batch size (with parallel & distributed & accumulation): {total_batch_size}")
+        accelerator.print(f" Gradient accumulation steps: {args.gradient_accumulation_steps}")
+        accelerator.print(f"Total optimization steps: {args.max_train_steps}")
 
         # TODO refactor metadata creation and move to util
         metadata = {
@@ -896,9 +853,6 @@ class NetworkTrainer:
 
                 # merge tag frequency:
                 for ds_dir_name, ds_freq_for_dir in dataset.tag_frequency.items():
-                    # 如果一个目录被多个dataset使用，则只计数一次
-                    # 因为我们最初指定了重复次数，所以标签在标题中出现的次数和它在学习中使用的次数并不匹配。
-                    # 所以在这里把多个dataset的次数加在一起也没什么意义
                     if ds_dir_name in tag_frequency:
                         continue
                     tag_frequency[ds_dir_name] = ds_freq_for_dir
@@ -1138,11 +1092,10 @@ class NetworkTrainer:
                         latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
                     else:
                         with torch.no_grad():
-                            # latentに変換
+
                             latents = self.encode_images_to_latents(args, accelerator, vae, batch["images"].to(vae_dtype))
                             latents = latents.to(dtype=weight_dtype)
 
-                            # NaNが含まれていれば警告を表示し0に置き換える
                             if torch.any(torch.isnan(latents)):
                                 accelerator.print("NaN found in latents, replacing with zeros")
                                 latents = torch.nan_to_num(latents, 0, out=latents)
@@ -1202,7 +1155,7 @@ class NetworkTrainer:
                         accelerator,
                         noise_scheduler,
                         latents,
-                        batch,  # 这里面有文本信息
+                        batch,  
                         text_encoder_conds,
                         unet,
                         network,
@@ -1210,12 +1163,10 @@ class NetworkTrainer:
                         train_unet,
                     )
                     
-                    # 处理返回值，支持多层监督
                     if len(get_noise_result) == 5:
                         noise_pred, target, timesteps, huber_c, weighting = get_noise_result
                         multilayer_supervision_loss = None
                     else:
-                        # 支持多层监督的返回格式
                         noise_pred, target, timesteps, multilayer_supervision_loss, weighting = get_noise_result
                         huber_c = None
 
@@ -1234,11 +1185,11 @@ class NetworkTrainer:
                     # min snr gamma, scale v pred loss like noise pred, v pred like loss, debiased estimation etc.
                     loss = self.post_process_loss(loss, args, timesteps, noise_scheduler)
 
-                    # 处理多层监督损失
+
                     if hasattr(self, 'post_process_loss_with_supervision') and multilayer_supervision_loss is not None:
                         loss = self.post_process_loss_with_supervision(loss, multilayer_supervision_loss, args, global_step)
 
-                    loss = loss.mean()  # 平均なのでbatch_sizeで割る必要なし
+                    loss = loss.mean()  
 
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
@@ -1269,7 +1220,7 @@ class NetworkTrainer:
                         accelerator, args, None, global_step, accelerator.device, vae, tokenizers, text_encoder, unet
                     )
 
-                    # 指定ステップごとにモデルを保存
+
                     if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:
                         accelerator.wait_for_everyone()
                         if accelerator.is_main_process:
@@ -1309,7 +1260,6 @@ class NetworkTrainer:
 
             accelerator.wait_for_everyone()
 
-            # 指定エポックごとにモデルを保存
             optimizer_eval_fn()
             if args.save_every_n_epochs is not None:
                 saving = (epoch + 1) % args.save_every_n_epochs == 0 and (epoch + 1) < num_train_epochs
@@ -1384,7 +1334,7 @@ def setup_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         nargs="*",
-        help="learning rate for Text Encoder, can be multiple / Text Encoderの学習率、複数指定可能",
+        help="learning rate for Text Encoder, can be multiple",
     )
     parser.add_argument(
         "--fp8_base_unet",
@@ -1453,43 +1403,40 @@ def setup_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         nargs="*",
-        help="network weights to merge into the model before training / 学習前にあらかじめモデルにマージするnetworkの重みファイル",
+        help="network weights to merge into the model before training",
     )
     parser.add_argument(
         "--base_weights_multiplier",
         type=float,
         default=None,
         nargs="*",
-        help="multiplier for network weights to merge into the model before training / 学習前にあらかじめモデルにマージするnetworkの重みの倍率",
+        help="multiplier for network weights to merge into the model before training",
     )
     parser.add_argument(
         "--no_half_vae",
         action="store_true",
-        help="do not use fp16/bf16 VAE in mixed precision (use float VAE) / mixed precisionでも fp16/bf16 VAEを使わずfloat VAEを使う",
+        help="do not use fp16/bf16 VAE in mixed precision (use float VAE)",
     )
     parser.add_argument(
         "--skip_until_initial_step",
         action="store_true",
-        help="skip training until initial_step is reached / initial_stepに到達するまで学習をスキップする",
+        help="skip training until initial_step is reached",
     )
     parser.add_argument(
         "--initial_epoch",
         type=int,
         default=None,
-        help="initial epoch number, 1 means first epoch (same as not specifying). NOTE: initial_epoch/step doesn't affect to lr scheduler. Which means lr scheduler will start from 0 without `--resume`."
-        + " / 初期エポック数、1で最初のエポック（未指定時と同じ）。注意：initial_epoch/stepはlr schedulerに影響しないため、`--resume`しない場合はlr schedulerは0から始まる",
+        help="initial epoch number, 1 means first epoch (same as not specifying). NOTE: initial_epoch/step doesn't affect to lr scheduler. Which means lr scheduler will start from 0 without `--resume`.",
     )
     parser.add_argument(
         "--initial_step",
         type=int,
         default=None,
-        help="initial step number including all epochs, 0 means first step (same as not specifying). overwrites initial_epoch."
-        + " / 初期ステップ数、全エポックを含むステップ数、0で最初のステップ（未指定時と同じ）。initial_epochを上書きする",
+        help="initial step number including all epochs, 0 means first step (same as not specifying). overwrites initial_epoch.",
     )
     parser.add_argument(
     "--lora_ups_num",
         type=int,
-        help="初始化lora的下游矩阵个数"
     )
     return parser
 
