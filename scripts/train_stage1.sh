@@ -16,7 +16,7 @@ max_train_steps=50000
 num_classes=10 
 
 accelerate launch --config_file="./config.yaml" \
-  --main_process_port=23325 flux_train_network_asylora.py \
+  --main_process_port=23325 train_stage1.py \
   --dataset_config $dataset_config \
   --pretrained_model_name_or_path $CKPT_PATH \
   --ae $AE_PATH \
