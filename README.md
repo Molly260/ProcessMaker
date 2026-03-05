@@ -16,6 +16,10 @@
   </p>
 </div>
 
+<p align="center">
+    <img src="images/example.pdf"/>
+</p
+
 ## ⚙️ Setup
 ####  Step 1: Environment setup
 
