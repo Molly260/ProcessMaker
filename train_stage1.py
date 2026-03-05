@@ -31,12 +31,10 @@ class ClassSpecificLoRAMask(torch.nn.Module):
         self.num_classes = num_classes
         self.network_dim = network_dim
         
-        # 为每个类别创建一个掩码
         self.class_masks = torch.nn.Parameter(torch.ones(num_classes, network_dim))
         self.class_masks.requires_grad_(True)
         
     def forward(self, class_ids):
-        # 根据类别ID选择对应的掩码
         selected_masks = self.class_masks[class_ids]
         return selected_masks
 
@@ -49,7 +47,6 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
         self.is_swapping_blocks: bool = False
         self.class_specific_mask = None
         
-        # 多层监督相关
         self.feature_extractor = None
         self.supervision_loss = None
         self.use_multilayer_supervision = False
@@ -103,18 +100,15 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
             logger.info(f"Using class specific LoRA mask with {args.num_classes} classes")
             self.class_specific_mask = ClassSpecificLoRAMask(args.num_classes, args.network_dim)
             
-        # 多层监督参数处理
         if hasattr(args, 'use_multilayer_supervision') and args.use_multilayer_supervision:
             self.use_multilayer_supervision = True
             logger.info("Using multi-layer feature supervision")
             
-            # 解析目标监督层
             if hasattr(args, 'target_supervision_layers') and args.target_supervision_layers:
                 target_layers = [int(x.strip()) for x in args.target_supervision_layers.split(',')]
             else:
-                target_layers = [4, 9, 14, 19, 29]  # 默认层
+                target_layers = [4, 9, 14, 19, 29]  
             
-            # 解析层权重
             layer_weights = {}
             if hasattr(args, 'layer_supervision_weights') and args.layer_supervision_weights:
                 weights = [float(x.strip()) for x in args.layer_supervision_weights.split(',')]
@@ -124,11 +118,9 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
                 else:
                     logger.warning("Layer weights count doesn't match target layers, using default weights")
             
-            # 初始化特征提取器和监督损失（启用内存优化）
             memory_efficient = getattr(args, 'lowram', False)
             self.feature_extractor = MultiLayerFeatureExtractor(target_layers, memory_efficient=memory_efficient)
             
-            # 损失类型
             loss_type = getattr(args, 'supervision_loss_type', 'cosine')
             self.supervision_loss = MultiLayerSupervisionLoss(layer_weights, loss_type)
             
@@ -220,7 +212,7 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
 
         if self.train_t5xxl and args.cache_text_encoder_outputs:
             raise ValueError(
-                "T5XXL is trained, so cache_text_encoder_outputs cannot be used / T5XXL学習時はcache_text_encoder_outputsは使用できません"
+                "T5XXL is trained, so cache_text_encoder_outputs cannot be used"
             )
 
     def get_models_for_text_encoding(self, args, accelerator, text_encoders):
@@ -253,7 +245,6 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
     ):
         if args.cache_text_encoder_outputs:
             if not args.lowram:
-                # メモリ消費を減らす
                 logger.info("move vae and unet to cpu to save memory")
                 org_vae_device = vae.device
                 org_unet_device = unet.device
@@ -311,26 +302,8 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
                 vae.to(org_vae_device)
                 unet.to(org_unet_device)
         else:
-            # Text Encoderから毎回出力を取得するので、GPUに乗せておく
             text_encoders[0].to(accelerator.device, dtype=weight_dtype)
             text_encoders[1].to(accelerator.device)
-
-    # def call_unet(self, args, accelerator, unet, noisy_latents, timesteps, text_conds, batch, weight_dtype):
-    #     noisy_latents = noisy_latents.to(weight_dtype)  # TODO check why noisy_latents is not weight_dtype
-
-    #     # get size embeddings
-    #     orig_size = batch["original_sizes_hw"]
-    #     crop_size = batch["crop_top_lefts"]
-    #     target_size = batch["target_sizes_hw"]
-    #     embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
-
-    #     # concat embeddings
-    #     encoder_hidden_states1, encoder_hidden_states2, pool2 = text_conds
-    #     vector_embedding = torch.cat([pool2, embs], dim=1).to(weight_dtype)
-    #     text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
-
-    #     noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
-    #     return noise_pred
 
     def sample_images(self, accelerator, args, epoch, global_step, device, ae, tokenizer, text_encoder, flux):
         text_encoders = text_encoder  # for compatibility
@@ -339,36 +312,6 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
         flux_train_utils.sample_images(
             accelerator, args, epoch, global_step, flux, ae, text_encoders, self.sample_prompts_te_outputs
         )
-        # return
-
-        """
-        class FluxUpperLowerWrapper(torch.nn.Module):
-            def __init__(self, flux_upper: flux_models.FluxUpper, flux_lower: flux_models.FluxLower, device: torch.device):
-                super().__init__()
-                self.flux_upper = flux_upper
-                self.flux_lower = flux_lower
-                self.target_device = device
-
-            def prepare_block_swap_before_forward(self):
-                pass
-
-            def forward(self, img, img_ids, txt, txt_ids, timesteps, y, guidance=None, txt_attention_mask=None):
-                self.flux_lower.to("cpu")
-                clean_memory_on_device(self.target_device)
-                self.flux_upper.to(self.target_device)
-                img, txt, vec, pe = self.flux_upper(img, img_ids, txt, txt_ids, timesteps, y, guidance, txt_attention_mask)
-                self.flux_upper.to("cpu")
-                clean_memory_on_device(self.target_device)
-                self.flux_lower.to(self.target_device)
-                return self.flux_lower(img, txt, vec, pe, txt_attention_mask)
-
-        wrapper = FluxUpperLowerWrapper(self.flux_upper, flux, accelerator.device)
-        clean_memory_on_device(accelerator.device)
-        flux_train_utils.sample_images(
-            accelerator, args, epoch, global_step, wrapper, ae, text_encoders, self.sample_prompts_te_outputs
-        )
-        clean_memory_on_device(accelerator.device)
-        """
 
     def get_noise_scheduler(self, args: argparse.Namespace, device: torch.device) -> Any:
         noise_scheduler = sd3_train_utils.FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=args.discrete_flow_shift)
@@ -411,12 +354,10 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
         # get guidance
         guidance_vec = torch.full((bsz,), float(args.guidance_scale), device=accelerator.device)
 
-        # 如果使用类别特定的掩码，获取类别ID并应用掩码
         if args.use_class_specific_mask and self.class_specific_mask is not None:
             class_ids = batch.get("class_ids", None)
             if class_ids is not None:
                 class_masks = self.class_specific_mask(class_ids)
-                # 获取原始network对象（处理DistributedDataParallel包装）
                 unwrapped_network = accelerator.unwrap_model(network)
                 unwrapped_network.apply_class_specific_mask(class_masks)
 
@@ -438,7 +379,6 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
             # if not args.split_mode:
             # normal forward
             with accelerator.autocast():
-                # YiYi notes: divide it by 1000 for now because we scale it by 1000 in the transformer model (we should not keep it but I want to keep the inputs same for the model for testing)
                 model_pred = unet(
                     img=img,
                     img_ids=img_ids,
@@ -449,55 +389,15 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
                     guidance=guidance_vec,
                     txt_attention_mask=t5_attn_mask
                 )
-            """
-            else:
-                # split forward to reduce memory usage
-                assert network.train_blocks == "single", "train_blocks must be single for split mode"
-                with accelerator.autocast():
-                    # move flux lower to cpu, and then move flux upper to gpu
-                    unet.to("cpu")
-                    clean_memory_on_device(accelerator.device)
-                    self.flux_upper.to(accelerator.device)
-
-                    # upper model does not require grad
-                    with torch.no_grad():
-                        intermediate_img, intermediate_txt, vec, pe = self.flux_upper(
-                            img=packed_noisy_model_input,
-                            img_ids=img_ids,
-                            txt=t5_out,
-                            txt_ids=txt_ids,
-                            y=l_pooled,
-                            timesteps=timesteps / 1000,
-                            guidance=guidance_vec,
-                            txt_attention_mask=t5_attn_mask,
-                        )
-
-                    # move flux upper back to cpu, and then move flux lower to gpu
-                    self.flux_upper.to("cpu")
-                    clean_memory_on_device(accelerator.device)
-                    unet.to(accelerator.device)
-
-                    # lower model requires grad
-                    intermediate_img.requires_grad_(True)
-                    intermediate_txt.requires_grad_(True)
-                    vec.requires_grad_(True)
-                    pe.requires_grad_(True)
-                    model_pred = unet(img=intermediate_img, txt=intermediate_txt, vec=vec, pe=pe, txt_attention_mask=t5_attn_mask)
-            """
-
             return model_pred
 
-        # 多层监督逻辑
         multilayer_supervision_loss = torch.tensor(0.0, device=accelerator.device)
         
         if self.use_multilayer_supervision and self.feature_extractor is not None and self.supervision_loss is not None:
-            # 注册hooks到UNet
             self.feature_extractor.register_hooks(unet)
-            
-            # 获取原始network对象（处理DistributedDataParallel包装）
+
             unwrapped_network = accelerator.unwrap_model(network)
-            
-            # 1. 获取教师特征（原始模型，multiplier=0）
+        
             unwrapped_network.set_multiplier(0.0)
             with torch.no_grad():
                 teacher_pred = call_dit(
@@ -512,10 +412,8 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
                 )
                 teacher_features = self.feature_extractor.get_features()
             
-            # 清理特征缓存
             self.feature_extractor.features = {}
-            
-            # 2. 获取学生特征（LoRA模型，multiplier=1）
+
             unwrapped_network.set_multiplier(1.0)
             model_pred = call_dit(
                 img=packed_noisy_model_input,
@@ -529,18 +427,14 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
             )
             student_features = self.feature_extractor.get_features()
             
-            # 3. 计算多层监督损失
             if teacher_features and student_features:
                 multilayer_supervision_loss = self.supervision_loss(teacher_features, student_features)
             
-            # 清理hooks和释放内存
             self.feature_extractor.clear_hooks()
             
-            # 强制清理GPU内存
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         else:
-            # 正常前向传播（不使用多层监督）
             model_pred = call_dit(
                 img=packed_noisy_model_input,
                 img_ids=img_ids,
@@ -569,7 +463,6 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
                     diff_output_pr_indices.append(i)
 
             if len(diff_output_pr_indices) > 0:
-                # 获取原始network对象（处理DistributedDataParallel包装）
                 unwrapped_network = accelerator.unwrap_model(network)
                 unwrapped_network.set_multiplier(0.0)
                 unet.prepare_block_swap_before_forward()
@@ -601,18 +494,14 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
         return loss
     
     def post_process_loss_with_supervision(self, loss, supervision_loss, args, global_step):
-        """处理包含多层监督损失的后处理"""
         if self.use_multilayer_supervision and supervision_loss is not None:
-            # 获取监督权重调度
             schedule_type = getattr(args, 'supervision_schedule', 'staged')
             max_steps = getattr(args, 'max_train_steps', 50000)
             supervision_weight = get_supervision_weight_schedule(global_step, max_steps, schedule_type)
             
-            # 基础监督权重
             base_supervision_weight = getattr(args, 'multilayer_supervision_weight', 0.5)
             final_supervision_weight = supervision_weight * base_supervision_weight
-            
-            # 动态调整层权重（可选）
+
             if hasattr(args, 'dynamic_layer_weights') and args.dynamic_layer_weights:
                 current_epoch = global_step // (max_steps // getattr(args, 'save_every_n_epochs', 10))
                 total_epochs = getattr(args, 'save_every_n_epochs', 10)
@@ -620,11 +509,9 @@ class FluxNetworkTrainer(train_network_asylora.NetworkTrainer):
                 if self.supervision_loss is not None:
                     self.supervision_loss.update_layer_weights(new_layer_weights)
             
-            # 合并损失
             total_loss = loss + final_supervision_weight * supervision_loss
             
-            # 记录日志
-            if global_step % 100 == 0:  # 每100步记录一次
+            if global_step % 100 == 0: 
                 logger.info(f"Step {global_step}: main_loss={loss.item():.6f}, "
                            f"supervision_loss={supervision_loss.item():.6f}, "
                            f"supervision_weight={final_supervision_weight:.3f}")
@@ -718,7 +605,6 @@ def setup_parser() -> argparse.ArgumentParser:
         help="[Deprecated] This option is deprecated. Please use `--blocks_to_swap` instead."
     )
     
-    # 添加类别特定掩码相关的参数
     parser.add_argument(
         "--num_classes",
         type=int,
@@ -731,7 +617,6 @@ def setup_parser() -> argparse.ArgumentParser:
         help="Whether to use class-specific LoRA mask"
     )
     
-    # 添加多层监督相关参数
     parser.add_argument(
         "--use_multilayer_supervision",
         action="store_true",
